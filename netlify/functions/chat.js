@@ -12,14 +12,16 @@ Rules:
 - "why" is 1-2 simple sentences explaining the recommendation using the person's own words. Use "Low" confidence if unsure.`;
 
 const KEYS = ["counseling","selfhelp","assess","group","sleep"];
-const MODELS = process.env.GEMINI_MODEL ? [process.env.GEMINI_MODEL] : ["gemini-2.5-flash","gemini-flash-latest","gemini-2.0-flash"];
+const MODELS = process.env.GEMINI_MODEL ? [process.env.GEMINI_MODEL] : ["gemini-2.5-flash","gemini-flash-latest","gemini-2.5-flash-lite","gemini-flash-lite-latest","gemini-2.0-flash"];
 const json = (code, obj) => ({ statusCode: code, headers: {"Content-Type":"application/json"}, body: JSON.stringify(obj, null, 2) });
 const clean = (s) => String(s).replace(process.env.GEMINI_API_KEY || "\u0000", "***").replace(process.env.ANTHROPIC_API_KEY || "\u0000", "***").slice(0, 300);
 
 async function callGemini(msgs) {
   const key = process.env.GEMINI_API_KEY;
   let last = "no attempt";
+  const t0 = Date.now();
   for (const model of MODELS) {
+    if (Date.now() - t0 > 7500) break; // stay inside Netlify's ~10s function limit
     const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
       method: "POST", headers: {"content-type":"application/json"},
       body: JSON.stringify({
@@ -35,7 +37,8 @@ async function callGemini(msgs) {
       last = "empty reply from " + model; continue;
     }
     last = `gemini ${r.status} on ${model}: ${clean(await r.text())}`;
-    if (r.status !== 404) break; // 404 = model name retired, try the next one
+    if ([400, 401, 403].includes(r.status)) break; // bad key or request: other models will not help
+    // 404 = retired model, 429/500/503 = busy: try the next model
   }
   throw new Error(last);
 }
