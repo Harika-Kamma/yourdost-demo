@@ -163,14 +163,16 @@ function showResult(r){var skip=0,n=r.order.length-2;
   log.scrollTop=log.scrollHeight}
  draw()}
 
+async function callAI(){var ac=new AbortController(),t=setTimeout(function(){ac.abort()},11000);
+ try{var res=await fetch("/.netlify/functions/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({messages:hist}),signal:ac.signal});
+  if(!res.ok){var j={};try{j=await res.json()}catch(x){}throw new Error("HTTP "+res.status+(j.error?": "+j.error:""))}
+  return await res.json()}finally{clearTimeout(t)}}
 async function send(){var t=ci.value.trim();if(!t||sb.disabled)return;ci.value="";add("me",t);hist.push({role:"user",content:t});
  if(CRISIS.test(hist.filter(function(m){return m.role==="user"}).map(function(m){return m.content}).join(" ")))return crisis(); /* fixed safety rule, runs before any AI */
  var typing=add("bot","…"),data,live,why="";sb.disabled=true;
- try{var res=await fetch("/.netlify/functions/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({messages:hist})});
-  if(!res.ok){var j={};try{j=await res.json()}catch(x){}throw new Error("HTTP "+res.status+(j.error?": "+j.error:""))}
-  data=await res.json();live=true}catch(e){data=local();live=false;why=" ("+e.message+")"}
+ try{data=await callAI();live=true}catch(e1){try{data=await callAI();live=true}catch(e){data=local();live=false;why=" ("+e.message+")"}}
  sb.disabled=false;
- mode.textContent=live?"AI mode: live":"Offline demo mode: AI not reachable, built-in engine answering"+why;
+ mode.textContent=live?"AI mode: live":"Backup mode: live AI is busy, so the built-in engine is answering"+why;
  if(data.crisis)return crisis();
  typing.textContent=data.reply||"Tell me a little more?";hist.push({role:"assistant",content:typing.textContent});
  if(data.ready&&SERVICES[data.primary]){var o=[data.primary].concat(data.alternatives||[]).filter(function(k){return SERVICES[k]});
