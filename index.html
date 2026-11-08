@@ -45,6 +45,7 @@ label.q{display:block;font-weight:600;margin:20px 0 8px}
 .theme-toggle{float:right;min-height:36px;padding:4px 12px;font-size:.85rem}
 .warn{background:var(--warn);color:var(--warn-ink);border-radius:12px;padding:12px 14px;margin:14px 0;font-size:.95rem}
 .hidden{display:none}
+h1:focus,h2:focus{outline:none}
 .log{display:flex;flex-direction:column;gap:10px;margin:12px 0;max-height:55vh;overflow:auto}
 .b{padding:10px 14px;border-radius:14px;max-width:88%;white-space:pre-wrap}
 .b.bot{background:var(--card);border:1px solid var(--line)}
@@ -68,179 +69,111 @@ var SERVICES={
  sleep:{name:"Sleep and relaxation exercises",blurb:"Wind-down audio and breathing routines for better rest."}
 };
 var THEMES=[
- {id:"sleep",label:"sleep trouble",kw:/sleep|insomnia|awake|nights?|restless|tossing|nap/i,w:{sleep:5,selfhelp:2,counseling:1}},
- {id:"stress",label:"work pressure",kw:/deadline|workload|pressure|overwhelm|stress|manager|target|too much|meeting|boss|appraisal/i,w:{assess:3,counseling:3,selfhelp:2}},
- {id:"burnout",label:"burnout signs",kw:/burn(ed|t)? ?out|exhaust|drained|tired all|no energy|fatigue|can'?t keep up|numb/i,w:{assess:5,counseling:3,sleep:1}},
- {id:"low",label:"low mood",kw:/sad|low|empty|hopeless|down|crying|worthless|no motivation|depress/i,w:{counseling:6,selfhelp:1}},
- {id:"anxious",label:"anxiety",kw:/anxi|panic|worry|worried|nervous|racing|on edge|dread|scared/i,w:{selfhelp:4,counseling:3,sleep:2}},
- {id:"lonely",label:"feeling isolated",kw:/lonely|alone|isolated|no one|nobody|new city|remote|miss (home|family)|left out/i,w:{group:6,counseling:2}}
+ {label:"sleep trouble",kw:/sleep|insomnia|awake|nights?|restless|tossing/i,w:{sleep:5,selfhelp:2,counseling:1}},
+ {label:"work pressure",kw:/deadline|workload|pressure|overwhelm|stress|manager|target|too much|meeting|boss/i,w:{assess:3,counseling:3,selfhelp:2}},
+ {label:"burnout signs",kw:/burn(ed|t)? ?out|exhaust|drained|tired all|no energy|fatigue|can'?t keep up|numb/i,w:{assess:5,counseling:3,sleep:1}},
+ {label:"low mood",kw:/sad|low|empty|hopeless|down|crying|worthless|no motivation|unmotivated|flat|depress/i,w:{counseling:6,selfhelp:1}},
+ {label:"anxiety",kw:/anxi|panic|worry|worried|nervous|racing|on edge|dread|scared/i,w:{selfhelp:4,counseling:3,sleep:2}},
+ {label:"feeling isolated",kw:/lonely|alone|isolated|no one|nobody|new city|remote|miss (home|family)|left out/i,w:{group:6,counseling:2}}
 ];
-var CRISIS=/kill myself|suicid|end my life|end it all|want to die|don'?t want to (live|be here)|hurt myself|self[- ]harm|no reason to live|better off (dead|without me)|cut myself|not worth living/i;
-var PERSONAS={
- a:{label:"Stressed by deadlines",text:"I have three deadlines this week and my manager keeps adding more work. I feel overwhelmed and can't switch off.",mood:2,dur:"A few weeks"},
- b:{label:"Can't sleep for weeks",text:"I lie awake until 3am most nights and my mind keeps racing. I'm tired all day.",mood:2,dur:"A few weeks"},
- c:{label:"Crisis-style message",text:"I don't see the point anymore. Sometimes I feel everyone would be better off without me.",mood:1,dur:"Months"}
-};
-var MOODS=["😣","😟","😐","🙂","😊"],MOODN=["Very low","Low","Okay","Good","Great"];
-var DURS=["A few days","A few weeks","Months"];
-var S={step:0,text:"",mood:null,dur:null,follow:"",askedFollow:false,res:null,skip:0,fb:null};
+var CRISIS=/kill myself|suicid|end my life|end it all|want to die|don'?t want to (live|be here)|hurt myself|self[- ]harm|no reason to live|better off (dead|without me)|cut myself|not worth living|point in living|see the point/i;
+var PERSONAS=[
+ {label:"Stressed by deadlines",text:"I have three deadlines this week and my manager keeps adding work. I feel overwhelmed and can't switch off."},
+ {label:"Can't sleep for weeks",text:"I lie awake until 3am most nights and my mind keeps racing. I'm tired all day."},
+ {label:"Feeling alone",text:"I moved to a new city for this job and I feel really alone. I eat lunch by myself every day."},
+ {label:"Crisis-style message",text:"I don't see the point in living anymore. Everyone would be better off without me."}
+];
+var S={res:null,skip:0};
 var app=document.getElementById("app"),prog=document.getElementById("prog");
 function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
-function setP(n){prog.style.width=n+"%"}
-function go(fn,p){fn();setP(p);window.scrollTo(0,0);var h=app.querySelector("h1,h2");if(h){h.setAttribute("tabindex","-1");h.focus({preventScroll:true})}}
+function go(fn,p){fn();prog.style.width=p+"%";window.scrollTo(0,0);var h=app.querySelector("h1,h2");if(h){h.setAttribute("tabindex","-1");h.focus({preventScroll:true})}}
 
-/* ---------- the "AI" layer: scoring engine (swap for an LLM call in production) ---------- */
-function analyse(text,mood,dur){
+/* Offline fallback engine, used only if the AI service cannot be reached */
+function analyse(text){
  var sc={counseling:0,selfhelp:0,assess:0,group:0,sleep:0},found=[];
  THEMES.forEach(function(t){if(t.kw.test(text)){found.push(t);for(var k in t.w)sc[k]+=t.w[k]}});
- if(mood!==null&&mood<=1){sc.counseling+=3}
- if(dur==="Months"){sc.counseling+=3;sc.assess+=1}
- if(dur==="A few days"){sc.selfhelp+=2}
  if(!found.length){sc.selfhelp+=2;sc.assess+=1}
  var order=Object.keys(sc).sort(function(a,b){return sc[b]-sc[a]});
  var top=sc[order[0]],gap=top-sc[order[1]];
- var conf=(found.length&&top>=7&&gap>=2)?"High":(found.length&&top>=4)?"Medium":"Low";
- var urgency=(mood!==null&&mood<=1&&dur==="Months")?"high":(mood!==null&&mood<=1)||dur==="Months"?"medium":"low";
- return{order:order,conf:conf,found:found,urgency:urgency,top:top};
+ return{order:order,found:found,conf:(found.length&&top>=7&&gap>=2)?"High":(found.length&&top>=4)?"Medium":"Low"};
 }
-function why(key,r,dur,mood){
- var themes=r.found.map(function(t){return t.label});
- var seen=themes.length?"You mentioned "+themes.slice(0,2).join(" and ")+". ":"You shared a little about how you feel. ";
- var d=dur?"It has lasted "+dur.toLowerCase()+". ":"";
- var why={
-  counseling:"Talking with a counselor helps most when things are weighing on you for a while.",
-  selfhelp:"Small, practical tools you can try today are a good first move, with no booking needed.",
-  assess:"A quick check shows whether stress or burnout is building, so your next step is based on facts.",
-  group:"Connecting with others who feel the same can ease isolation faster than going it alone.",
-  sleep:"Poor sleep feeds stress and low mood, so improving it often makes everything else easier."
- }[key];
- return seen+d+why;
-}
+var WHY={counseling:"Talking with a counselor helps most when things weigh on you for a while.",selfhelp:"Small, practical tools you can try today are a good first move, with no booking needed.",assess:"A quick check shows whether stress or burnout is building, so your next step is based on facts.",group:"Connecting with others who feel the same can ease isolation.",sleep:"Better sleep often makes stress and low mood easier to handle."};
+function whyLocal(r){var t=r.found.map(function(x){return x.label});return(t.length?"You mentioned "+t.slice(0,2).join(" and ")+". ":"You shared a little about how you feel. ")+WHY[r.order[0]]}
 
-/* ---------- screens ---------- */
-function welcome(){go(function(){S.step=0;
- app.innerHTML='<h1>Not sure where to start? Let’s find your next step.</h1>'+
- '<p>Answer two quick questions. We’ll suggest one thing from YourDOST that fits how you feel right now. It takes about two minutes.</p>'+
- '<div class="notice"><b>Demo notice:</b> Don’t enter real names, company details or personal data. Nothing you type is saved or sent anywhere.</div>'+
- '<div class="actions"><button class="primary" id="start">Start check-in</button><button id="chatb">Chat with the AI navigator</button></div>'+
+function welcome(){go(function(){
+ app.innerHTML='<h1>Not sure which support is right for you? Let’s talk it through.</h1>'+
+ '<p>Tell the Navigator how you’re feeling in your own words. It asks a couple of questions, then suggests the one YourDOST service that fits best. It takes about two minutes.</p>'+
+ '<div class="notice"><b>Demo notice:</b> Use fictional details only. Nothing is stored. Your messages are sent to an AI service to write replies.</div>'+
+ '<div class="actions"><button class="primary" id="start">Start chat</button></div>'+
  '<p class="muted" style="margin-top:22px">This is guidance to help you choose a service, not a diagnosis or therapy.</p>';
- document.getElementById("start").onclick=checkin;document.getElementById("chatb").onclick=chat;},0)}
+ document.getElementById("start").onclick=chat;},0)}
 
-function checkin(){go(function(){S.step=1;
- app.innerHTML='<h2>What’s on your mind?</h2>'+
- '<label class="q" for="t">Tell us in your own words</label>'+
- '<textarea id="t" rows="4" placeholder="For example: I’ve been feeling drained after work and can’t focus."></textarea>'+
- '<div class="q" id="ml" style="font-weight:600;margin:20px 0 8px">How are you feeling today?</div>'+
- '<div class="row mood" role="group" aria-labelledby="ml">'+MOODS.map(function(m,i){return'<button class="chip" data-m="'+i+'" aria-pressed="false" aria-label="'+MOODN[i]+'">'+m+'</button>'}).join("")+'</div>'+
- '<div class="q" id="dl" style="font-weight:600;margin:20px 0 8px">How long has this been going on?</div>'+
- '<div class="row" role="group" aria-labelledby="dl">'+DURS.map(function(d){return'<button class="chip" data-d="'+d+'" aria-pressed="false">'+d+'</button>'}).join("")+'</div>'+
- '<div class="warn hidden" id="err" role="alert">Please add a few words about how you feel, then choose how you’re feeling today.</div>'+
- '<div class="actions"><button class="primary" id="go">See my next step</button></div>'+
- '<div class="personas"><div class="muted" style="margin-bottom:8px">Demo: try a fictional person</div><div class="row">'+
- Object.keys(PERSONAS).map(function(k){return'<button data-p="'+k+'">'+PERSONAS[k].label+'</button>'}).join("")+'</div></div>';
- var t=document.getElementById("t");t.value=S.text;
- function pick(attr,val){app.querySelectorAll("["+attr+"]").forEach(function(b){b.setAttribute("aria-pressed",b.getAttribute(attr)==String(val))})}
- app.querySelectorAll("[data-m]").forEach(function(b){b.onclick=function(){S.mood=+b.dataset.m;pick("data-m",S.mood)}});
- app.querySelectorAll("[data-d]").forEach(function(b){b.onclick=function(){S.dur=b.dataset.d;pick("data-d",S.dur)}});
- if(S.mood!==null)pick("data-m",S.mood);if(S.dur)pick("data-d",S.dur);
- app.querySelectorAll("[data-p]").forEach(function(b){b.onclick=function(){var p=PERSONAS[b.dataset.p];t.value=p.text;S.mood=p.mood;S.dur=p.dur;pick("data-m",S.mood);pick("data-d",S.dur)}});
- document.getElementById("go").onclick=function(){
-  S.text=t.value.trim();
-  if(S.text.split(/\s+/).length<3||S.mood===null){document.getElementById("err").classList.remove("hidden");return}
-  if(!S.dur)S.dur="A few days";
-  S.follow="";S.askedFollow=false;S.skip=0;S.fb=null;process();};
- },25)}
-
-function process(){
- var all=S.text+" "+S.follow;
- if(CRISIS.test(all)){return crisis()}               /* fixed rule: never depends on the model */
- var r=analyse(all,S.mood,S.dur);
- if(r.conf==="Low"&&!S.askedFollow&&!r.found.length){return followup()}
- S.res=r;result();
-}
-
-function followup(){S.askedFollow=true;go(function(){S.step=2;
- app.innerHTML='<h2>One quick question</h2><p>Thanks for sharing. To point you to the right place: <b>what part of your day feels hardest right now?</b> (for example work, sleep, home or being around people)</p>'+
- '<textarea id="f" rows="3" aria-label="Your answer"></textarea><div class="actions"><button class="primary" id="fa">Continue</button><button id="fs">Skip</button></div>';
- document.getElementById("fa").onclick=function(){S.follow=document.getElementById("f").value;process()};
- document.getElementById("fs").onclick=function(){S.res=analyse(S.text,S.mood,S.dur);result()};},50)}
-
-function crisis(){go(function(){S.step=9;
- app.innerHTML='<div class="card crisis"><h2>You don’t have to handle this alone</h2>'+
- '<p>What you wrote sounds really painful. Please talk to a real person right now. Support is free and available.</p>'+
- '<div class="num">Tele-MANAS: <a href="tel:14416">14416</a></div><div class="num">KIRAN: <a href="tel:18005990019">1800-599-0019</a></div>'+
- '<p class="muted">Helpline numbers shown for the demo. Confirm them before real use. If you are in immediate danger, call your local emergency number (112 in India) or go to the nearest hospital.</p>'+
- '<div class="actions"><button class="primary" id="cc">Connect to a YourDOST counselor now</button></div>'+
- '<p id="ccm" class="notice hidden">Demo only: in the real product this opens an immediate chat or call with an on-duty counselor.</p>'+
- '<p class="muted">Is someone with you? Consider telling a friend, family member or colleague you trust.</p></div>'+
- '<div class="actions"><button id="bk">Go back</button></div>';
- document.getElementById("cc").onclick=function(){document.getElementById("ccm").classList.remove("hidden")};
- document.getElementById("bk").onclick=welcome;},100)}
-
-function result(){go(function(){S.step=3;
- var r=S.res,i=S.skip%(r.order.length-2),prim=r.order[i],alts=[r.order[i+1],r.order[i+2]];
- var h='<h2>Your suggested next step</h2>';
- if(r.urgency==="high")h+='<div class="warn">You’ve been feeling low for a long time. Talking to a person can help. We’ve put counseling first below, and you can start it today.</div>';
- var cf=r.skip?"Medium":r.conf;
- h+='<div class="card rec"><h3 style="margin:0;font-size:1.25rem">'+SERVICES[prim].name+'<span class="badge">'+cf+' confidence</span></h3>'+
- '<p style="margin:6px 0">'+SERVICES[prim].blurb+'</p><div class="why"><b>Why this?</b> '+esc(r.aiWhy&&i===0?r.aiWhy:why(prim,r,S.dur,S.mood))+'</div>'+
- '<button class="primary" id="st">Start</button> <span id="stm" class="muted"></span></div>';
- if(cf==="Low")h+='<div class="notice">We’re not very sure about this one. You can <b>talk to a counselor</b> who can help you decide.</div>';
- h+='<h3 style="margin:24px 0 4px;font-size:1.05rem">Other options that may help</h3>';
- alts.forEach(function(k,j){h+='<div class="card alt"><h3>'+SERVICES[k].name+'</h3><div class="muted">'+SERVICES[k].blurb+'</div><button data-alt="'+k+'" style="margin-top:8px;min-height:40px">Start this instead</button></div>'});
- h+='<div class="actions"><button id="try">Not quite right? Show me another</button></div>'+
- '<div class="card" style="margin-top:22px"><b>Was this helpful?</b> <span id="fbw"><button class="chip" data-f="up" aria-label="Helpful">👍</button> <button class="chip" data-f="down" aria-label="Not helpful">👎</button></span><div id="fbm" class="muted"></div></div>'+
- '<p class="muted" style="margin-top:18px">This is guidance, not a diagnosis. If you ever feel unsafe, <a href="#" id="hc" style="color:var(--teal-d)">talk to a human now</a>.</p>'+
- '<div class="actions"><button id="re">Start over</button></div>';
- app.innerHTML=h;
- var msg=function(el,k){el.textContent="Demo: this would open “"+SERVICES[k].name+"” in YourDOST."};
- document.getElementById("st").onclick=function(){msg(document.getElementById("stm"),prim)};
- app.querySelectorAll("[data-alt]").forEach(function(b){b.onclick=function(){b.textContent="Demo: would open “"+SERVICES[b.dataset.alt].name+"”"}});
- document.getElementById("try").onclick=function(){S.skip=(S.skip+1)%(r.order.length-2);S.res.skip=1;result()};
- app.querySelectorAll("[data-f]").forEach(function(b){b.onclick=function(){S.fb=b.dataset.f;document.getElementById("fbm").textContent=S.fb==="up"?"Thanks! That helps us improve.":"Thanks. Try “show me another”, or talk to a counselor.";}});
- document.getElementById("hc").onclick=function(e){e.preventDefault();crisis()};
- document.getElementById("re").onclick=function(){S={step:0,text:"",mood:null,dur:null,follow:"",askedFollow:false,res:null,skip:0,fb:null};welcome()};
- },90)}
-
-
-/* ---------- AI chat ---------- */
-function chat(){go(function(){S.step=4;var hist=[],live=false;
- app.innerHTML='<h2>Chat with the Navigator</h2><p class="muted" id="mode">Tell me what’s going on. I’ll ask a couple of questions, then suggest one next step.</p>'+
- '<div class="log" id="log" aria-live="polite"></div>'+
- '<div class="cin"><textarea id="ci" rows="2" aria-label="Your message" placeholder="Type here…"></textarea><button class="primary" id="send">Send</button></div>'+
- '<div class="notice">Demo: use fictional details only. Messages are not stored. This is guidance, not therapy or a diagnosis.</div>'+
+function chat(){go(function(){var hist=[],live=null;
+ app.innerHTML='<h2>Chat with the Navigator</h2><p class="muted" id="mode">Connecting…</p>'+
+ '<div class="log" id="log"></div>'+
+ '<div class="cin"><textarea id="ci" rows="2" aria-label="Your message" placeholder="Type how you’re feeling…"></textarea><button class="primary" id="send">Send</button></div>'+
+ '<div class="personas"><div class="muted" style="margin-bottom:8px">Demo: tap to fill in a fictional person, then press Send</div><div class="row" id="pp"></div></div>'+
+ '<div class="notice">Use fictional details only. This is guidance, not therapy or a diagnosis.</div>'+
  '<div class="actions"><button id="bk">Back</button></div>';
- var log=document.getElementById("log"),ci=document.getElementById("ci");
- function add(cls,t){var d=document.createElement("div");d.className="b "+cls;d.textContent=t;log.appendChild(d);log.scrollTop=log.scrollHeight;return d}
+ var log=document.getElementById("log"),ci=document.getElementById("ci"),sb=document.getElementById("send"),mode=document.getElementById("mode");
+ mode.textContent="Tell me what’s going on. I’ll ask a couple of questions, then suggest one next step.";
+ PERSONAS.forEach(function(p){var b=document.createElement("button");b.textContent=p.label;b.onclick=function(){ci.value=p.text;ci.focus()};document.getElementById("pp").appendChild(b)});
+ function add(c,t){var d=document.createElement("div");d.className="b "+c;d.textContent=t;log.appendChild(d);log.scrollTop=log.scrollHeight;return d}
  add("bot","Hi, I’m the Navigator. How are you feeling today?");
- function local(){var n=hist.filter(function(m){return m.role==="user"}).length;
-  if(n<2)return{reply:"Thanks for sharing that. What part of your day feels hardest right now?",ready:false};
-  var r=analyse(hist.map(function(m){return m.content}).join(" "),null,null);
-  return{reply:"Thank you. Here’s what I’d suggest.",ready:true,primary:r.order[0],alternatives:[r.order[1],r.order[2]],confidence:r.conf,why:why(r.order[0],r,null,null)}}
+ function local(){var n=hist.filter(function(m){return m.role==="user"}).length,all=hist.map(function(m){return m.content}).join(" "),r=analyse(all);
+  if(n<2&&r.conf==="Low")return{reply:"Thanks for sharing that. What part of your day feels hardest right now?",ready:false};
+  return{reply:"Thank you for telling me. Here’s what I’d suggest.",ready:true,primary:r.order[0],alternatives:[r.order[1],r.order[2]],confidence:r.conf,why:whyLocal(r)}}
  async function send(){
-  var t=ci.value.trim();if(!t)return;ci.value="";add("me",t);hist.push({role:"user",content:t});
-  var allUser=hist.filter(function(m){return m.role==="user"}).map(function(m){return m.content}).join(" ");
-  if(CRISIS.test(allUser))return crisis();            /* fixed safety rule runs before any AI */
-  var typing=add("bot","…"),data;
-  document.getElementById("send").disabled=true;
+  var t=ci.value.trim();if(!t||sb.disabled)return;ci.value="";add("me",t);hist.push({role:"user",content:t});
+  if(CRISIS.test(hist.filter(function(m){return m.role==="user"}).map(function(m){return m.content}).join(" ")))return crisis(); /* fixed safety rule, runs before any AI */
+  var typing=add("bot","…"),data,why="";sb.disabled=true;
   try{var res=await fetch("/.netlify/functions/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({messages:hist})});
-   if(!res.ok)throw new Error("x");data=await res.json();live=true}catch(e){data=local();live=false}
-  document.getElementById("send").disabled=false;
-  document.getElementById("mode").textContent=live?"AI mode: live":"Offline demo mode: using the built-in engine (the AI service is not connected).";
+   if(!res.ok)throw new Error("HTTP "+res.status);data=await res.json();live=true}
+  catch(e){data=local();live=false;why=" ("+e.message+")"}
+  sb.disabled=false;
+  mode.textContent=live?"AI mode: live":"Offline demo mode: the AI service is not reachable, so the built-in engine is answering"+why+".";
   if(data.crisis)return crisis();
   typing.textContent=data.reply||"Tell me a little more?";hist.push({role:"assistant",content:typing.textContent});
   if(data.ready&&SERVICES[data.primary]){
-   var order=[data.primary].concat(data.alternatives||[]);Object.keys(SERVICES).forEach(function(k){if(order.indexOf(k)<0)order.push(k)});
-   S.res={order:order,conf:data.confidence||"Medium",found:[],urgency:"low",aiWhy:data.why,skip:0};S.skip=0;S.mood=null;S.dur=null;
-   var b=document.createElement("button");b.className="primary";b.textContent="See my next step";b.onclick=result;log.appendChild(b);log.scrollTop=log.scrollHeight;
-   document.getElementById("send").disabled=true;ci.disabled=true}
+   var order=[data.primary].concat(data.alternatives||[]).filter(function(k){return SERVICES[k]});Object.keys(SERVICES).forEach(function(k){if(order.indexOf(k)<0)order.push(k)});
+   S.res={order:order,conf:data.confidence||"Medium",why:data.why,live:live};S.skip=0;
+   var b=document.createElement("button");b.className="primary";b.textContent="See my next step";b.onclick=function(){result(chat)};log.appendChild(b);log.scrollTop=log.scrollHeight;sb.disabled=true;ci.disabled=true}
   else ci.focus()}
- document.getElementById("send").onclick=send;
- ci.addEventListener("keydown",function(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send()}});
- document.getElementById("bk").onclick=welcome;ci.focus();},30)}
+ sb.onclick=send;ci.addEventListener("keydown",function(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send()}});
+ document.getElementById("bk").onclick=welcome;ci.focus();},40)}
 
-var th=document.getElementById("theme");
-th.onclick=function(){var d=document.documentElement,cur=d.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");d.setAttribute("data-theme",cur==="dark"?"light":"dark")};
+function crisis(){go(function(){
+ app.innerHTML='<div class="card crisis"><h2>You don’t have to handle this alone</h2>'+
+ '<p>What you wrote sounds really painful. Please talk to a real person right now. Support is free and available.</p>'+
+ '<div class="num">Tele-MANAS: <a href="tel:14416">14416</a></div><div class="num">KIRAN: <a href="tel:18005990019">1800-599-0019</a></div>'+
+ '<p class="muted">Confirm these numbers before real use. If you are in immediate danger, call 112 or go to the nearest hospital.</p>'+
+ '<div class="actions"><button class="primary" id="cc">Connect to a YourDOST counselor now</button></div>'+
+ '<p id="ccm" class="notice hidden">Demo only: the real product would open an immediate chat or call with an on-duty counselor.</p>'+
+ '<p class="muted">Is someone with you? Consider telling a friend, family member or colleague you trust.</p></div>'+
+ '<div class="actions"><button id="bk">Back to start</button></div>';
+ document.getElementById("cc").onclick=function(){document.getElementById("ccm").classList.remove("hidden")};
+ document.getElementById("bk").onclick=welcome;},100)}
+
+function result(back){go(function(){
+ var r=S.res,n=r.order.length-2,i=S.skip%n,prim=r.order[i],alts=[r.order[i+1],r.order[i+2]],cf=S.skip?"Medium":r.conf;
+ var why=(i===0&&r.why)?r.why:WHY[prim];
+ var h='<h2>Your suggested next step</h2><div class="card rec"><h3 style="margin:0;font-size:1.25rem">'+SERVICES[prim].name+'<span class="badge">'+cf+' confidence</span></h3>'+
+ '<p style="margin:6px 0">'+SERVICES[prim].blurb+'</p><div class="why"><b>Why this?</b> '+esc(why)+'</div><button class="primary" id="st">Start</button> <span id="stm" class="muted"></span></div>';
+ if(cf==="Low")h+='<div class="notice">We’re not very sure about this one. A counselor can help you decide.</div>';
+ h+='<h3 style="margin:24px 0 4px;font-size:1.05rem">Other options that may help</h3>';
+ alts.forEach(function(k){h+='<div class="card alt"><h3>'+SERVICES[k].name+'</h3><div class="muted">'+SERVICES[k].blurb+'</div></div>'});
+ h+='<div class="actions"><button id="try">Not quite right? Show me another</button></div>'+
+ '<div class="card" style="margin-top:22px"><b>Was this helpful?</b> <button class="chip" data-f="up" aria-label="Helpful">👍</button> <button class="chip" data-f="down" aria-label="Not helpful">👎</button><div id="fbm" class="muted"></div></div>'+
+ '<p class="muted" style="margin-top:18px">'+(r.live?"Written by AI. ":"")+'This is guidance, not a diagnosis. If you ever feel unsafe, <a href="#" id="hc" style="color:var(--teal-d)">talk to a human now</a>.</p>'+
+ '<div class="actions"><button id="bk">Back to chat</button><button id="re">Start over</button></div>';
+ app.innerHTML=h;
+ document.getElementById("st").onclick=function(){document.getElementById("stm").textContent="Demo: this would open “"+SERVICES[prim].name+"” in YourDOST."};
+ document.getElementById("try").onclick=function(){S.skip=(S.skip+1)%n;result(back)};
+ app.querySelectorAll("[data-f]").forEach(function(b){b.onclick=function(){document.getElementById("fbm").textContent=b.dataset.f==="up"?"Thanks! That helps us improve.":"Thanks. Try “show me another”, or talk to a counselor."}});
+ document.getElementById("hc").onclick=function(e){e.preventDefault();crisis()};
+ document.getElementById("bk").onclick=back;document.getElementById("re").onclick=welcome;},90)}
+
+document.getElementById("theme").onclick=function(){var d=document.documentElement,c=d.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");d.setAttribute("data-theme",c==="dark"?"light":"dark")};
 welcome();
 </script>
 </body>
